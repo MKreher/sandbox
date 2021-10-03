@@ -1,0 +1,65 @@
+/ {
+	chosen {
+		/*
+		 * In some default configurations within the nRF Connect SDK,
+		 * e.g. on nRF52840 and nRF9160, the chosen zephyr,entropy node
+		 * is &cryptocell. This devicetree overlay ensures that default
+		 * is overridden wherever it is set, as this application uses
+		 * the RNG node for entropy exclusively.
+		 */
+		zephyr,entropy = &rng;
+	};
+	
+	/delete-node/ leds;
+	
+	aliases {
+		led0 = &led0;
+		led1 = &led1;
+		led2 = &led2;
+		led3 = &led3;
+	};
+
+	leds0 {
+        compatible = "gpio-leds";
+        label = "Green LED 0";
+        status = "okay";
+        led0: led_0 {
+                gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+                label = "Green LED 0";
+        };
+	};
+	
+	leds1 {
+        compatible = "gpio-leds";
+        label = "Green LED 1";
+        status = "okay";
+        led1: led_1 {
+                gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
+                label = "Green LED 1";
+				status = "okay";
+        };
+	};
+	
+	leds2 {
+        compatible = "gpio-leds";
+        label = "Green LED 2";
+        status = "okay";
+        led2: led_2 {
+                gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+                label = "Green LED 2";
+				status = "okay";
+        };
+	};
+	
+	leds3 {
+        compatible = "gpio-leds";
+        label = "Green LED 3";
+        status = "okay";
+        led3: led_3 {
+                gpios = <&gpio0 16 GPIO_ACTIVE_LOW>;
+                label = "Green LED 3";
+				status = "okay";
+        };
+	};
+};
+
