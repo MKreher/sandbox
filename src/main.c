@@ -15,66 +15,68 @@
 #include <logging/log.h>
 LOG_MODULE_REGISTER(app);
 
-static lv_disp_draw_buf_t disp_buf;
-static lv_color_t buf_1[200 * 200]; // full screen size buffer
-static lv_color_t buf_2 = NULL; // full screen size buffer
-
-static lv_disp_drv_t disp_drv;
-
-static struct display_buffer_descriptor buf_desc;
-
-
-void my_flush_cb(lv_disp_drv_t * disp_drv, const lv_area_t * area, lv_color_t * color_p)
+void my_flush_cb(struct _disp_drv_t *disp_drv,
+		const lv_area_t *area, lv_color_t *color_p)
 {
-        LOG_INF("my_flush_cb() called.");
+	uint16_t w = area->x2 - area->x1 + 1;
+	uint16_t h = area->y2 - area->y1 + 1;
+	const struct device *display_dev = (const struct device *)disp_drv->user_data;
+	struct display_capabilities cap;
+	struct display_buffer_descriptor desc;
 
-        /* IMPORTANT!!!
-         * Inform the graphics library that you are ready with the flushing*/
-        lv_disp_flush_ready(disp_drv);
+	display_get_capabilities(display_dev, &cap);
+
+	desc.buf_size = (w * h)/8U;
+	desc.width = w;
+	desc.pitch = w;
+	desc.height = h;
+
+	display_write(display_dev, area->x1, area->y1, &desc, color_p);
+
+	lv_disp_flush_ready(disp_drv);
 }
 
-void my_monitor_cb(lv_disp_drv_t * disp_drv, uint32_t time, uint32_t px)
-{
-        LOG_INF("my_monitor_cb() called.");
-}
+LV_FONT_DECLARE(font_jet_brains_mono_bold_18);
+LV_FONT_DECLARE(font_space_mono_regular_18);
+LV_IMG_DECLARE(tictac);
 
 void main(void)
-{
-	const struct device *display_dev;
+{       
+        LOG_INF("main() called.");
 
-	display_dev = device_get_binding(CONFIG_LVGL_DISPLAY_DEV_NAME);
+	lv_disp_t *lv_disp = lv_disp_get_default();
+        lv_disp_drv_t lv_disp_drv = lv_disp->driver;
 
-	if (display_dev == NULL) {
-		LOG_ERR("device not found.  Aborting test.");
-		return;
-	}
+        lv_disp_drv.flush_cb   = my_flush_cb;
 
-        lv_init();
-        lv_disp_draw_buf_init(&disp_buf, buf_1, buf2, 200 * 200);
-
-        
-        lv_disp_drv_init(&disp_drv);            /*Basic initialization*/
-
-	buf_desc.buf_size = 200 * 200 / 8;
-	buf_desc.width = 200;
-	buf_desc.height = 200;
-
-        disp_drv.draw_buf = &disp_buf;          /*Set an initialized buffer*/
-        disp_drv.flush_cb = my_flush_cb;        /*Set a flush callback to draw to the display*/
-        disp_drv.hor_res = 200;                 /*Set the horizontal resolution in pixels*/
-        disp_drv.ver_res = 200;                 /*Set the vertical resolution in pixels*/
-
-        lv_disp_t * disp;
-        disp = lv_disp_drv_register(&disp_drv); /*Register the driver and save the created display objects*/        
+        lv_disp_drv_update(lv_disp, &lv_disp_drv);
+        //static lv_style_t my_style;
+        //lv_style_init(&my_style);
+        //lv_style_set_text_font(&my_style, LV_STATE_DEFAULT, LV_FONT_MONTSERRAT_12);
         
         // Display Hello World
         lv_obj_t *hello_world_label;
         hello_world_label = lv_label_create(lv_scr_act(), NULL);
-        lv_label_set_text(hello_world_label, "Hello world!");
+        //lv_obj_add_style(hello_world_label, 0, &my_style);
+        //lv_obj_set_style_local_text_font(hello_world_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &lv_font_montserrat_18);
+        lv_obj_set_style_local_text_font(hello_world_label, LV_LABEL_PART_MAIN, LV_STATE_DEFAULT, &font_space_mono_regular_18);
+        //lv_obj_report_style_mod(NULL);
+        lv_obj_refresh_style(hello_world_label, LV_LABEL_PART_MAIN, LV_STYLE_PROP_ALL);
+        //lv_label_set_text(hello_world_label, "Hallo Michael!");
+        //lv_label_set_text(hello_world_label, LV_SYMBOL_OK " " "Hallo Michael!");
+        lv_label_set_text(hello_world_label, "ÄÖÜäöüßá´`'#.,|");
         lv_obj_align(hello_world_label, NULL, LV_ALIGN_CENTER, 0, 0);
-        //lv_label_set_long_mode(hello_world_label, LV_LABEL_LONG_CROP);
-        lv_obj_set_width(hello_world_label, 100);
+        lv_obj_set_width(hello_world_label, 200);
         lv_label_set_align(hello_world_label, LV_LABEL_ALIGN_LEFT);
+        
+        // display image
+        /*
+        lv_obj_t *tictac_img;
+        tictac_img = lv_img_create(lv_scr_act(), NULL);
+        lv_img_set_src(tictac_img,  &tictac);
+        lv_obj_align(tictac_img, NULL, LV_ALIGN_CENTER, 0, 0);
+        */
+        
 
 	lv_task_handler();
 }
