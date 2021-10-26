@@ -1,0 +1,31 @@
+description: E3000H barcode scanner module
+
+compatible: "yoko,e3000h"
+
+include: [base.yaml]
+
+properties:
+  buzzer-gpios:
+    type: phandle-array
+    description: buzzer gpio pin
+    required: true
+    
+  led-gpios:
+    type: phandle-array
+    description: led gpio pin
+    required: true
+    
+  reset-gpios:
+    type: phandle-array
+    description: reset gpio pin
+    required: true
+    
+  trigger-gpios:
+    type: phandle-array
+    description: trigger gpio pin
+    required: true
+    
+  uart:
+    type: phandle
+    description: UART instance
+    required: true

@@ -17,49 +17,70 @@
 		led1 = &led1;
 		led2 = &led2;
 		led3 = &led3;
+                barcode-scanner = &e3000h;
 	};
 
 	leds0 {
-        compatible = "gpio-leds";
-        label = "Green LED 0";
-        status = "okay";
-        led0: led_0 {
-                gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
-                label = "Green LED 0";
+                compatible = "gpio-leds";
+                label = "Green LED_0";
+                status = "okay";
+                led0: led_0 {
+                        gpios = <&gpio0 13 GPIO_ACTIVE_LOW>;
+                        label = "GPIO 13";
+                        status = "okay";
+                };
         };
-	};
 	
 	leds1 {
-        compatible = "gpio-leds";
-        label = "Green LED 1";
-        status = "okay";
-        led1: led_1 {
-                gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
-                label = "Green LED 1";
-				status = "okay";
-        };
+                compatible = "gpio-leds";
+                label = "Green LED_1";
+                status = "okay";
+                led1: led_1 {
+                        gpios = <&gpio0 14 GPIO_ACTIVE_LOW>;
+                        label = "GPIO 14";
+                        status = "okay";
+                };
 	};
 	
 	leds2 {
-        compatible = "gpio-leds";
-        label = "Green LED 2";
-        status = "okay";
-        led2: led_2 {
-                gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
-                label = "Green LED 2";
-				status = "okay";
-        };
+                compatible = "gpio-leds";
+                label = "Green LED_2";
+                status = "okay";
+                led2: led_2 {
+                        gpios = <&gpio0 15 GPIO_ACTIVE_LOW>;
+                        label = "GPIO 15";
+                        status = "okay";
+                };
 	};
 	
 	leds3 {
-        compatible = "gpio-leds";
-        label = "Green LED 3";
-        status = "okay";
-        led3: led_3 {
-                gpios = <&gpio0 16 GPIO_ACTIVE_LOW>;
-                label = "Green LED 3";
-				status = "okay";
-        };
+                compatible = "gpio-leds";
+                label = "Green LED_3";
+                status = "okay";
+                led3: led_3 {
+                        gpios = <&gpio0 16 GPIO_ACTIVE_LOW>;
+                        label = "GPIO 16";
+                        status = "okay";
+                };
 	};
+
+        e3000h: e3000h {
+                compatible = "yoko,e3000h";
+                label = "E3000H";
+                status = "okay";
+                uart = <&uart1>;
+                buzzer-gpios  = <&gpio0  4 GPIO_ACTIVE_LOW>;
+                led-gpios     = <&gpio0  3 GPIO_ACTIVE_LOW>;
+                reset-gpios   = <&gpio0 28 GPIO_ACTIVE_LOW>;
+                trigger-gpios = <&gpio0 29 GPIO_ACTIVE_LOW>;
+        };     
 };
 
+&uart1 {
+        status = "okay";
+        current-speed = <9600>;
+        rx-pin = <30>;
+        tx-pin = <31>;
+        rts-pin = <0xFFFFFFFF>;
+        cts-pin = <0xFFFFFFFF>;
+};

@@ -1,0 +1,17 @@
+menuconfig E3000H_BARCODE_DRIVER
+	bool "Enable support for the E3000H barcode scanner module driver"
+	default n
+	depends on SERIAL
+	depends on UART_ASYNC_API=y
+
+if E3000H_BARCODE_DRIVER
+
+config E3000H_BARCODE_DRIVER_THREAD_STACK_SIZE
+	int "E3000H barcode driver thread stack size"
+	default 512
+
+endif # E3000H_BARCODE_DRIVER
+
+module = E3000H_BARCODE_MODULE
+module-str = E3000H barcode driver
+source "subsys/logging/Kconfig.template.log_config"
