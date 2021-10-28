@@ -17,7 +17,7 @@
 		led1 = &led1;
 		led2 = &led2;
 		led3 = &led3;
-                barcode-scanner = &e3000h;
+                //barcode-scanner = &e3000h;
 	};
 
 	leds0 {
@@ -64,7 +64,7 @@
                 };
 	};
 
-        e3000h: e3000h {
+        e3000h {
                 compatible = "yoko,e3000h";
                 label = "E3000H";
                 status = "okay";

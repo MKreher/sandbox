@@ -24,7 +24,7 @@ endif()
 # For the sake of demonstration, we add the driver directory as a zephyr module
 # by hand. If your driver is a project that's managed by west, you can remove this line.
 list(APPEND ZEPHYR_EXTRA_MODULES
-  ${CMAKE_CURRENT_SOURCE_DIR}/barcode_module
+  ${CMAKE_CURRENT_SOURCE_DIR}/barcode_module_driver
   )
   
 # Define configuration files.

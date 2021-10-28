@@ -12,46 +12,41 @@ extern "C" {
 typedef char* e3000h_command_t;
 typedef char* e3000h_command_return_t;
 
-//typedef void (*barcode_handler)(const void *barcode_buf);
+struct barcode_t
+{
+	int length;
+	char* data;
+};
+
+typedef void (*barcode_handler_t)(const struct barcode_t *barcode);
 
 // API
-//typedef int(*barcode_set_barcode_handler_api)(const struct device *dev, const *barcode_handler);
-typedef int (*barcode_start_decoding_api)(const struct device *dev);
+typedef int (*barcode_start_decoding_api)(const struct device *dev, barcode_handler_t barcode_handler);
 typedef int (*barcode_stop_decoding_api)(const struct device *dev);
 typedef e3000h_command_return_t (*barcode_send_command_api)(const struct device *dev, const e3000h_command_t command);
 
 
 struct barcode_driver_api {
-//	barcode_set_barcode_handler_api set_barcode_handler;
 	barcode_start_decoding_api start_decoding;
 	barcode_stop_decoding_api stop_decoding;
 	barcode_send_command_api send_command;
 };
 
-/*
-static inline int set_barcode_handler(const struct device *dev, const *barcode_handler)
+static inline int barcode_start_decoding(const struct device *dev, barcode_handler_t barcode_handler)
 {
 	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
 
-	return api->set_barcode_handler(dev, barcode_handler);
-}
-*/
-
-static inline int start_decoding(const struct device *dev)
-{
-	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
-
-	return api->start_decoding(dev);
+	return api->start_decoding(dev, barcode_handler);
 }
 
-static inline int stop_decoding(const struct device *dev)
+static inline int barcode_stop_decoding(const struct device *dev)
 {
 	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
 
 	return api->stop_decoding(dev);
 }
 
-static inline e3000h_command_return_t send_command(const struct device *dev, const e3000h_command_t command)
+static inline e3000h_command_return_t barcode_send_command(const struct device *dev, const e3000h_command_t command)
 {
 	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
 
