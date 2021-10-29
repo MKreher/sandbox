@@ -9,9 +9,6 @@
 extern "C" {
 #endif
 
-typedef char* e3000h_command_t;
-typedef char* e3000h_command_return_t;
-
 struct barcode_t
 {
 	int length;
@@ -23,13 +20,15 @@ typedef void (*barcode_handler_t)(const struct barcode_t *barcode);
 // API
 typedef int (*barcode_start_decoding_api)(const struct device *dev, barcode_handler_t barcode_handler);
 typedef int (*barcode_stop_decoding_api)(const struct device *dev);
-typedef e3000h_command_return_t (*barcode_send_command_api)(const struct device *dev, const e3000h_command_t command);
+typedef int (*barcode_send_command_api)(const struct device *dev, const char* command, const int command_length, const bool check_for_ack_message);
+typedef int (*barcode_send_command_with_response_api)(const struct device *dev, const char* command, const int command_length, const char* response);
 
 
 struct barcode_driver_api {
 	barcode_start_decoding_api start_decoding;
 	barcode_stop_decoding_api stop_decoding;
 	barcode_send_command_api send_command;
+	barcode_send_command_with_response_api send_command_with_response;
 };
 
 static inline int barcode_start_decoding(const struct device *dev, barcode_handler_t barcode_handler)
@@ -46,11 +45,18 @@ static inline int barcode_stop_decoding(const struct device *dev)
 	return api->stop_decoding(dev);
 }
 
-static inline e3000h_command_return_t barcode_send_command(const struct device *dev, const e3000h_command_t command)
+static inline int barcode_send_command(const struct device *dev, const char* command, const int command_length, const bool check_for_ack_message)
 {
 	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
 
-	return api->send_command(dev, command);
+	return api->send_command(dev, command, command_length, check_for_ack_message);
+}
+
+static inline int barcode_send_command_with_response(const struct device *dev, const char* command, const int command_length, const char* response)
+{
+	struct barcode_driver_api *api = (struct barcode_driver_api *) dev->api;
+
+	return api->send_command_with_response(dev, command, command_length, response);
 }
 
 #ifdef __cplusplus
