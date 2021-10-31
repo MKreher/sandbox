@@ -70,7 +70,7 @@ static void button_1_pressed_handler()
         led_evt->led_effect = &led_effect_def[system_led_effect];
         EVENT_SUBMIT(led_evt);
 
-        int ret = barcode_start_decoding(e3000h_dev, &barcode_handler);
+        barcode_start_decoding(e3000h_dev, &barcode_handler);
 }
 
 static void button_1_released_handler()
@@ -85,7 +85,7 @@ static void button_1_released_handler()
         led_evt->led_effect = &led_effect_def[system_led_effect];
         EVENT_SUBMIT(led_evt);
 
-        int ret = barcode_stop_decoding(e3000h_dev);
+        barcode_stop_decoding(e3000h_dev);
 }
 
 static void button_2_pressed_handler()
@@ -96,6 +96,18 @@ static void button_2_pressed_handler()
 static void button_2_released_handler()
 {
         LOG_DBG("Button 2 released.");
+
+        char response[16];
+        int response_length = 0;
+
+        char CMD_WAKEUP[] = { 0x00 };
+        char CMD_PARAM_GET_BAUD_RATE[] = { 0x05, 0xC7, 0x04, 0x00, 0x9C, 0xFE, 0x94 };
+        
+        barcode_send_command(e3000h_dev, CMD_WAKEUP, sizeof(CMD_WAKEUP), false);
+        int ret = barcode_send_command_with_response(e3000h_dev, CMD_PARAM_GET_BAUD_RATE, sizeof(CMD_PARAM_GET_BAUD_RATE), response, &response_length);
+        
+        LOG_DBG("barcode_send_command_with_response() returned with code: %d", ret);
+        LOG_HEXDUMP_DBG(response, response_length, "Command Response received:");
 }
 
 
