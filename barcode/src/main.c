@@ -236,9 +236,9 @@ void init(void)
 		LOG_INF("Found E3000H device binding\n");
 	}
 
-	int ret = barcode_start_decoding(e3000h_dev, &barcode_handler);
-	k_msleep(500);
-	ret = barcode_stop_decoding(e3000h_dev);
+	//int ret = barcode_start_decoding(e3000h_dev, &barcode_handler);
+	//k_msleep(500);
+	//ret = barcode_stop_decoding(e3000h_dev);
 }
 
 void show_ready(void)

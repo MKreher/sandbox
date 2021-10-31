@@ -2,7 +2,7 @@ config E3000H_BARCODE_DRIVER
 	bool "Enable support for the E3000H barcode scanner module driver"
 	default n
 	depends on SERIAL
-	depends on UART_ASYNC_API=y
+	depends on UART_ASYNC_API=n
 
 if E3000H_BARCODE_DRIVER
 
@@ -13,6 +13,10 @@ config E3000H_BARCODE_DRIVER_THREAD_STACK_SIZE
 config E3000H_BARCODE_DRIVER_THREAD_PRIORITY
 	int "E3000H barcode driver thread priority"
 	default 5
+	
+config E3000H_BARCODE_DRIVER_SEND_COMMAND_DEFAULT_MAX_RETRIES
+	int "E3000H barcode driver default max retries for sending commands to the scan engine"
+	default 0
 	
 endif # E3000H_BARCODE_DRIVER
 

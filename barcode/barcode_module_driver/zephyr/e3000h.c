@@ -15,6 +15,8 @@ LOG_MODULE_REGISTER(MODULE, CONFIG_E3000H_BARCODE_MODULE_LOG_LEVEL);
 
 #define DT_DRV_COMPAT yoko_e3000h
 
+enum driver_state_enum {IDLE, AWAITING_BARCODE, AWAITING_CMD_ACK, AWAITING_CMD_RESPONSE};
+
 struct e3000h_data
 {
 	const struct gpio_dt_spec *trigger;
@@ -23,6 +25,7 @@ struct e3000h_data
 	const struct gpio_dt_spec *led;
 	const struct device *uart;
 	barcode_handler_t barcode_handler;
+	enum driver_state_enum state;
 };
 
 static struct e3000h_data e3000h_driver;
@@ -33,26 +36,17 @@ const struct gpio_dt_spec e3000h_buzzer_gpio = GPIO_DT_SPEC_INST_GET(0, buzzer_g
 const struct gpio_dt_spec e3000h_led_gpio = GPIO_DT_SPEC_INST_GET(0, led_gpios);
 
 #define UART_RX_TIMEOUT_MS      100
-#define UART_RX_BUF_SIZE		32
-#define UART_RX_MSG_QUEUE_SIZE	8
-
-struct uart_msg_queue_item
-{
-	uint8_t bytes[UART_RX_BUF_SIZE];
-	uint32_t length;
-};
-
-// semaphores
-K_SEM_DEFINE(tx_done, 1, 1);
-K_SEM_DEFINE(rx_disabled, 0, 1);
+#define UART_RX_BUF_SIZE		16
 
 // UART RX primary buffers
-uint8_t uart_rx_buffer[UART_RX_BUF_SIZE];
+char uart_rx_buffer[UART_RX_BUF_SIZE];
 
-// UART RX message queue
-K_MSGQ_DEFINE(uart_rx_msgq, sizeof(struct uart_msg_queue_item), UART_RX_MSG_QUEUE_SIZE, 4);
-
-enum driver_state_enum {IDLE, AWAITING_BARCODE, AWAITING_CMD_ACK, AWAITING_CMD_RESPONSE} driver_state;
+enum message_type_enum {
+	UNKNOWN,
+	DEVICE_ACK_MESSAGE,
+	DEVICE_NACK_RESEND_MESSAGE,
+	DEVICE_NACK_DENIED_MESSAGE,
+	DEVICE_NACK_BAD_CONTEXT_MESSAGE};
 
 char CMD_ACK_RESPONSE_MESSAGE[] = { 0x04, 0xD0, 0x00, 0x00, 0xFF, 0x2C }; // Response ACK-Message from scan engine
 char CMD_NACK_RESEND_RESPONSE_MESSAGE[] = { 0x04, 0xD1, 0x00, 0x01, 0xFF, 0x25 }; // Response NACK-Message (RESEND) from scan engine
@@ -95,7 +89,17 @@ char CMD_PARAM_SET_TRIGGER_MODE_HOST[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x8A, 0
 char CMD_PARAM_SET_TRIGGER_MODE_AUTOMATIC_INDUCTION[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x8A, 0x09, 0xFE, 0x94 };
 char CMD_PARAM_SET_TRIGGER_MODE_BUTTON_CONTINUOUS[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x8A, 0x0A, 0xFE, 0x93 };
 
+char CMD_PARAM_SET_NO_READ_MESSAGE_ENABLE[] = {0x07, 0xC6, 0x04, 0x08, 0x00, 0x5E, 0x01, 0xFE, 0xC8};
+char CMD_PARAM_SET_NO_READ_MESSAGE_DISABLE[] = {0x07, 0xC6, 0x04, 0x08, 0x00, 0x5E, 0x00, 0xFE, 0xC9};
+
 char CMD_PARAM_GET_BAUD_RATE[] = { 0x05, 0xC7, 0x04, 0x00, 0x9C, 0xFE, 0x94 };
+char CMD_PARAM_SET_BAUD_RATE_4800[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x9C, 0x05, 0xFE, 0x86 };
+char CMD_PARAM_SET_BAUD_RATE_9600[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x9C, 0x06, 0xFE, 0x85 };
+char CMD_PARAM_SET_BAUD_RATE_19200[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x9C, 0x07, 0xFE, 0x84 };
+
+char CMD_PARAM_GET_STOP_BITS[] = { 0x05, 0xC7, 0x04, 0x00, 0x9D, 0xFE, 0x93 };
+char CMD_PARAM_SET_STOP_BITS_1[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x9D, 0x01, 0xFE, 0x89 };
+char CMD_PARAM_SET_STOP_BITS_2[] = { 0x07, 0xC6, 0x04, 0x08, 0x00, 0x9D, 0x02, 0xFE, 0x88 };
 
 char CMD_PARAM_GET_COMMUNICATION_MODE[] = { 0x06, 0xC7, 0x04, 0x00, 0xF2, 0x01, 0xFE, 0x3C };
 
@@ -136,6 +140,7 @@ void clear_uart_rx_buffer()
 	memset(&uart_rx_buffer, 0, UART_RX_BUF_SIZE);
 }
 
+/*
 static void e3000h_barcode_reading_entry_point(int unused1, int unused2, int unused3)
 {	
     struct uart_msg_queue_item incoming_message;
@@ -176,99 +181,88 @@ static void e3000h_barcode_reading_entry_point(int unused1, int unused2, int unu
 K_THREAD_DEFINE(e3000h_barcode_reading_thread_tid, CONFIG_E3000H_BARCODE_DRIVER_THREAD_STACK_SIZE,
                 e3000h_barcode_reading_entry_point, NULL, NULL, NULL,
                 CONFIG_E3000H_BARCODE_DRIVER_THREAD_PRIORITY, 0, 0);
+*/
 
-static int wait_for_ack_message(int timeout)
+static int e3000h_uart_read(const struct device *uart, char* rx_buf, const int rx_buf_len, int *rx_len, k_timeout_t timeout_in_ms)
 {
-	struct uart_msg_queue_item incoming_message;
+	LOG_DBG("e3000h_uart_read()");
 
-	int ret = k_msgq_get(&uart_rx_msgq, &incoming_message, K_MSEC(timeout));
-	
-	if (ret == 0)
-	{
-		LOG_DBG("Message received.");
+	//struct e3000h_data *driver = dev->data;
 
-		// check for ACK message from scan engine: {0x04, 0xD0, 0x00, 0x00, 0xFF, 0x2C} 
-		if (incoming_message.bytes[0] == 0x04
-			&& incoming_message.bytes[1] == 0xD0
-			&& incoming_message.bytes[2] == 0x00
-			&& incoming_message.bytes[3] == 0x00
-			&& incoming_message.bytes[4] == 0xFF
-			&& incoming_message.bytes[5] == 0x2C)
-		{
-			return 0;
-		}
-		else
-		{
+	int bytes_read_counter = 0; 
+	int poll_result;
+	bool byte_received = false;
+
+	char byte_buf[1];
+
+    // compute the end time from the timeout
+    uint64_t end = sys_clock_timeout_end_calc(timeout_in_ms);
+
+    while (1) {
+
+		// check timeout
+		if (end < k_uptime_ticks() && byte_received == false)
+		{	
+			// timeout
+			LOG_DBG("e3000h_uart_read(): timeout");
 			return -1;
 		}
-	}
 
-	return ret;
-}
-
-static int e3000h_uart_send(const struct device *dev, const uint8_t * data_ptr, uint32_t data_len)
-{
-	struct e3000h_data *driver = dev->data;
-
-	if (k_sem_take(&tx_done, K_NO_WAIT) == 0)
-	{
-		LOG_HEXDUMP_DBG(data_ptr, data_len, "uart tx buffer");
-		return uart_tx(driver->uart, data_ptr, data_len, SYS_FOREVER_MS);
-	}
-
-	return -1;
-}
-
-static void e3000h_uart_async_callback(const struct device *uart_dev, struct uart_event *evt, void *user_data)
-{
-	static struct uart_msg_queue_item new_message;
-
-	switch (evt->type)
-	{
-		case UART_TX_DONE:
-			LOG_DBG("UART_TX_DONE");
-			k_sem_give(&tx_done);
-			break;
-
-		case UART_TX_ABORTED:
-			LOG_DBG("UART_TX_ABORTED");
-			break;
-
-		case UART_RX_RDY:
-			LOG_DBG("UART_RX_RDY[offset=%d,len=%d]", evt->data.rx.offset, evt->data.rx.len);
-			memcpy(new_message.bytes, evt->data.rx.buf + evt->data.rx.offset, evt->data.rx.len);
-			new_message.length = evt->data.rx.len;
-			LOG_HEXDUMP_DBG(evt->data.rx.buf, UART_RX_BUF_SIZE, "uart rx buffer");
-			LOG_HEXDUMP_DBG(new_message.bytes, new_message.length, "uart rx message");
-			if (k_msgq_put(&uart_rx_msgq, &new_message, K_NO_WAIT) != 0)
-			{
-				LOG_ERR("Error: Uart RX message queue full!\n");
-			}
-			break;
+		// check buffer space left
+		if (bytes_read_counter > rx_buf_len)
+		{
+			// buffer full
+			LOG_DBG("e3000h_uart_read(): buffer full");
+			memcpy(rx_len, &bytes_read_counter, 1);
+			return ENOBUFS;
+		}
 		
-		case UART_RX_BUF_REQUEST:
-			LOG_DBG("UART_RX_BUF_REQUEST");
-			break;
+		poll_result = uart_poll_in(uart, byte_buf);
 
-		case UART_RX_BUF_RELEASED:
-			LOG_DBG("UART_RX_BUF_RELEASED");
-			clear_uart_rx_buffer();
-			break;
+		switch (poll_result)
+		{
+			case 0:
+				// byte received
+				//LOG_HEXDUMP_DBG(byte_buf, 1, "e3000h_uart_read(): byte received.");
+				byte_received = true;
+				bytes_read_counter++;
+				rx_buf[bytes_read_counter-1] = byte_buf[0];
+				k_msleep(1); // IMPORTANT: sleep 1 msec to prevent receive bytes not correctly
+				break;
 
-		case UART_RX_DISABLED:
-			LOG_DBG("UART_RX_DISABLED");
-			clear_uart_rx_buffer();
-			k_sem_give(&rx_disabled);
-			break;
+			case -1:
+				// no character was available to read
+				//LOG_DBG("e3000h_uart_read(): no byte received.");
+				if (byte_received)
+				{
+					//LOG_HEXDUMP_DBG(rx_buf, rx_buf_len, "e3000h_uart_read(): Message received.");
+					memcpy(rx_len, &bytes_read_counter, 1);
+					return 0;
+				}
+				break;
 
-		case UART_RX_STOPPED:
-			LOG_DBG("UART_RX_STOPPED");
-			clear_uart_rx_buffer();
-			break;			
+			default:
+				LOG_DBG("Unexpected poll_result: %d.", poll_result);
+				return poll_result;
+		}
 
-		default:
-			LOG_DBG("app_uart_async_callback(): %d", evt->type);
-			break;
+        // Wait for notification of state change
+        //k_sem_take(obj->sem, timeout_in_ms);
+    }
+
+	// should never been reached
+	return 0;
+}
+
+static void e3000h_uart_send(const struct device *uart, const uint8_t * data_ptr, uint32_t data_len)
+{
+	LOG_HEXDUMP_DBG(data_ptr, data_len, "uart tx buffer");
+	
+	int i=0;
+
+	while (i < data_len)
+	{
+		uart_poll_out(uart, data_ptr[i++]);
 	}
 }
 
@@ -282,12 +276,9 @@ static int e3000h_start_decoding(const struct device *dev, barcode_handler_t bar
 
 	driver->barcode_handler = barcode_handler;
 
-	driver_state = AWAITING_BARCODE;
+	driver->state = AWAITING_BARCODE;	
 	
-	
-	k_thread_resume(e3000h_barcode_reading_thread_tid);
-
-	uart_rx_enable(driver->uart, &uart_rx_buffer, UART_RX_BUF_SIZE, UART_RX_TIMEOUT_MS);
+	//k_thread_resume(e3000h_barcode_reading_thread_tid);
 
 	gpio_pin_set(driver->trigger->port, driver->trigger->pin, 0);
 
@@ -302,14 +293,71 @@ static int e3000h_stop_decoding(const struct device *dev)
 
     gpio_pin_set(driver->trigger->port, driver->trigger->pin, 1);
 		
-	uart_rx_disable(driver->uart);
 
-	driver_state = IDLE;
+	driver->state = IDLE;
 
 	device_busy_clear(dev);
 
 	return 0;
 }
+
+static enum message_type_enum get_message_type(const char* msg)
+{
+	LOG_DBG("message_type_enum()");
+
+	if (msg == NULL)
+	{
+		LOG_DBG("msg is null");
+		return UNKNOWN;
+	}
+
+	// ACK-Message is {0x04, 0xD0, 0x00, 0x00, 0xFF, 0x2C}
+	if (msg[0] == 0x04
+		&& msg[1] == 0xD0
+		&& msg[2] == 0x00
+		&& msg[3] == 0x00
+		&& msg[4] == 0xFF
+		&& msg[5] == 0x2C)
+	{
+		return DEVICE_ACK_MESSAGE;
+	}
+	
+	// NACK resend Message is { 0x04, 0xD1, 0x00, 0x01, 0xFF, 0x25 }
+	if (msg[0] == 0x04
+		&& msg[1] == 0xD0
+		&& msg[2] == 0x00
+		&& msg[3] == 0x01
+		&& msg[4] == 0xFF
+		&& msg[5] == 0x25)
+	{
+		return DEVICE_NACK_RESEND_MESSAGE;
+	}
+
+	// NACK denied Message is { 0x04, 0xD1, 0x00, 0x06, 0xFF, 0x20 }
+	if (msg[0] == 0x04
+		&& msg[1] == 0xD0
+		&& msg[2] == 0x00
+		&& msg[3] == 0x06
+		&& msg[4] == 0xFF
+		&& msg[5] == 0x20)
+	{
+		return DEVICE_NACK_DENIED_MESSAGE;
+	}
+
+	// NACK bad context Message is { 0x04, 0xD1, 0x00, 0x02, 0xFF, 0x24 }
+	if (msg[0] == 0x04
+		&& msg[1] == 0xD0
+		&& msg[2] == 0x00
+		&& msg[3] == 0x02
+		&& msg[4] == 0xFF
+		&& msg[5] == 0x22)
+	{
+		return DEVICE_NACK_BAD_CONTEXT_MESSAGE;
+	}
+
+	return UNKNOWN;
+}
+
 
 static int e3000h_send_command(const struct device *dev, const char* command, const int command_length, const bool awaiting_ack_message)
 {
@@ -317,46 +365,82 @@ static int e3000h_send_command(const struct device *dev, const char* command, co
 
 	struct e3000h_data *driver = dev->data;
 
-	int ret;
+	clear_uart_rx_buffer();
 	
 	if (awaiting_ack_message)
 	{
-		// enable uart for receiving
-		ret = uart_rx_enable(driver->uart, &uart_rx_buffer, UART_RX_BUF_SIZE, UART_RX_TIMEOUT_MS);
-		__ASSERT(ret == 0, "Error while enabling uart receiving: %d", ret);
-
 		// send command
 		int retry_counter = 0;
 		int ret_ack;
+		int rx_len = 0;
 
-		do
+		while(1)
 		{
 			LOG_HEXDUMP_DBG(command, command_length, "Send command and wait for ACK message");
-			ret = e3000h_uart_send(dev, command, command_length);
-			__ASSERT(ret == 0, "Error while uart sending : %d", ret);
+			e3000h_uart_send(driver->uart, command, command_length);
 
-			ret_ack = wait_for_ack_message(1000); 
-			LOG_DBG("Wait for ACK message returned %d (retry_counter=%d)", ret_ack, retry_counter);
-		}
-		while (ret_ack != 0 && retry_counter++ < 2);
-	
-		// disable uart for receiving
-		ret = uart_rx_disable(driver->uart);
-		__ASSERT(ret == 0, "Error while disabling uart receiving: %d", ret);
+			ret_ack = e3000h_uart_read(driver->uart, &uart_rx_buffer, UART_RX_BUF_SIZE, &rx_len, K_MSEC(UART_RX_TIMEOUT_MS));
+			LOG_DBG("e3000h_uart_read - end: ret=%d, rx_len=%d", ret_ack, rx_len);
+			LOG_HEXDUMP_DBG(uart_rx_buffer, UART_RX_BUF_SIZE, "UART RX");
 
-		if (ret_ack != 0)
-		{
-			// no ack message received
-			LOG_WRN("No ack message received.");
-			return ret_ack;
+			if (ret_ack == 0)
+			{	
+				// check for ACK message from scan engine: 
+				switch (get_message_type(&uart_rx_buffer))
+				{
+					case DEVICE_ACK_MESSAGE:
+						// this is the expected case
+						LOG_DBG("ACK message received.");
+						return 0;
+						break;
+					case DEVICE_NACK_RESEND_MESSAGE:
+						LOG_WRN("NACK message received (resend)");						
+						// In this case a resend of the command should be done.
+						// But only if max retry count is not reached.
+						if (retry_counter == CONFIG_E3000H_BARCODE_DRIVER_SEND_COMMAND_DEFAULT_MAX_RETRIES)
+						{							
+							// give up
+							LOG_WRN("No NACK message received (resend). Give up after %d retries.", retry_counter);
+							return -1;
+						}
+						break;
+					case DEVICE_NACK_DENIED_MESSAGE:
+						LOG_WRN("NACK message received (denied)");
+						return -1;
+						break;
+					case DEVICE_NACK_BAD_CONTEXT_MESSAGE:
+						LOG_WRN("NACK message received (bad context)");
+						return -1;
+						break;
+					default:
+						// ACK message expected. But unknown message received.
+						LOG_HEXDUMP_WRN(uart_rx_buffer, rx_len, "ACK message expected. But unknown message received.");
+						return -1;
+						break;
+				}
+			}
+			else
+			{
+				// No ACK message received.
+				// In this case a resend of the command should be done.
+				// But only if max retry count is not reached.
+				LOG_WRN("No ACK message received.");
+				if (retry_counter == CONFIG_E3000H_BARCODE_DRIVER_SEND_COMMAND_DEFAULT_MAX_RETRIES)
+				{
+					// give up
+					LOG_WRN("No ACK message received. Give up after %d retries.", retry_counter);
+					return -1;
+				}
+			}
+
+			retry_counter++;
 		}
 	}
-	else
+	else // not awaiting_ack_message
 	{
 		// send command
-		LOG_HEXDUMP_DBG(command, command_length, "Send command NOT wait for ACK message");
-		ret = e3000h_uart_send(dev, command, command_length);
-		__ASSERT(ret == 0, "Error while uart sending : %d", ret);
+		LOG_HEXDUMP_DBG(command, command_length, "Send command NO wait for ACK message");
+		e3000h_uart_send(driver->uart, command, command_length);
 	}
 
 	return 0;
@@ -384,8 +468,15 @@ static void e3000h_init_uart(const struct device *dev)
 {
 	struct e3000h_data *driver = dev->data;
 
-	uart_callback_set(driver->uart, e3000h_uart_async_callback, NULL);
-	uart_rx_enable(driver->uart, &uart_rx_buffer, UART_RX_BUF_SIZE, UART_RX_TIMEOUT_MS);
+	struct uart_config cfg;
+
+	uart_config_get(driver->uart, &cfg);
+
+	LOG_DBG("UART-Config: baudrate=%d", cfg.baudrate);
+	LOG_DBG("UART-Config: data_bits=%d", cfg.data_bits);
+	LOG_DBG("UART-Config: flow_ctrl=%d", cfg.flow_ctrl);
+	LOG_DBG("UART-Config: parity=%d", cfg.parity);
+	LOG_DBG("UART-Config: stop_bits=%d", cfg.stop_bits);
 }
 
 struct command_t
@@ -399,30 +490,17 @@ static void e3000h_barcode_init(const struct device *dev)
 {
 	struct e3000h_data *driver = dev->data;
 
-	driver_state = IDLE;
-
-	//uart_rx_enable(driver->uart, &uart_rx_buffer, UART_RX_BUF_SIZE, UART_RX_TIMEOUT_MS);
+	driver->state = IDLE;
 
 	e3000h_send_command(dev, CMD_WAKEUP, sizeof(CMD_WAKEUP), false);
 	e3000h_send_command(dev, CMD_PARAM_SET_SOFTWARE_HANDSHAKING_ENABLE, sizeof(CMD_PARAM_SET_SOFTWARE_HANDSHAKING_ENABLE), true);
+	e3000h_send_command(dev, CMD_PARAM_SET_BAUD_RATE_9600, sizeof(CMD_PARAM_SET_BAUD_RATE_9600), true);
+	//e3000h_send_command(dev, CMD_PARAM_GET_BAUD_RATE, sizeof(CMD_PARAM_GET_BAUD_RATE), true);
 	e3000h_send_command(dev, CMD_SCAN_ENABLE, sizeof(CMD_SCAN_ENABLE), true);
 	e3000h_send_command(dev, CMD_PARAM_SET_TERMINATOR_DISABLE, sizeof(CMD_PARAM_SET_TERMINATOR_DISABLE), true);
 	e3000h_send_command(dev, CMD_PARAM_SET_POWER_MODE_LOW, sizeof(CMD_PARAM_SET_POWER_MODE_LOW), true);
+	//e3000h_send_command(dev, CMD_PARAM_SET_NO_READ_MESSAGE_ENABLE, sizeof(CMD_PARAM_SET_NO_READ_MESSAGE_ENABLE), true);
 
-	//uart_rx_disable(driver->uart);
-
-	/*
-	uart_rx_enable(driver->uart, &uart_buffer, UART_RX_BUF_SIZE, UART_RX_TIMEOUT_MS);
-
-	e3000h_uart_send(dev, CMD_WAKEUP, sizeof(CMD_WAKEUP));
-	k_msleep(10);
-	e3000h_uart_send(dev, CMD_PARAM_SET_SOFTWARE_HANDSHAKING_ENABLE, sizeof(CMD_PARAM_SET_SOFTWARE_HANDSHAKING_ENABLE));
-	e3000h_uart_send(dev, CMD_SCAN_ENABLE, sizeof(CMD_SCAN_ENABLE));	
-	e3000h_uart_send(dev, CMD_PARAM_SET_TERMINATOR_DISABLE, sizeof(CMD_PARAM_SET_TERMINATOR_DISABLE));
-	e3000h_uart_send(dev, CMD_PARAM_SET_POWER_MODE_LOW, sizeof(CMD_PARAM_SET_POWER_MODE_LOW));
-
-	uart_rx_disable(driver->uart);
-	*/
 }
 
 static int e3000h_init(const struct device *dev)
@@ -442,7 +520,7 @@ static int e3000h_init(const struct device *dev)
 	e3000h_init_gpio(dev);
 	e3000h_init_uart(dev);
 	e3000h_barcode_init(dev);
-	
+
 	return 0;
 }
 
